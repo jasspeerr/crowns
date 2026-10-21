@@ -1,0 +1,79 @@
+# Example configuration. Relative paths are resolved against this file's folder.
+# Only settings that differ from the defaults (see src/crowns/config.py) need to be listed.
+
+project:
+  name: mymunicipality          # used in the output file name: output/crowns_<name>.gpkg
+  workdir: ../data              # downloads, cache and per-tile results
+  output_dir: ../output
+
+area:
+  # Option 1: CBS/Kadaster municipality code, fetched from the PDOK "Bestuurlijke gebieden" WFS.
+  municipality_code: "0344"     # e.g. 0344 = Utrecht
+  # wfs_url: https://service.pdok.nl/kadaster/bestuurlijkegebieden/wfs/v1_0
+  # wfs_type_name: bestuurlijkegebieden:Gemeentegebied
+  # wfs_code_field: code
+  # Option 2: your own boundary file (any vector format), optionally filtered on an attribute.
+  # boundary_file: ../input/boundary.gpkg
+  # boundary_filter_field: gemeentecode
+  # boundary_filter_value: "0344"
+
+tiling:
+  size: 500                     # metres
+  buffer: 25                    # must be larger than the widest crown radius
+
+ahn:
+  # Pick ONE source.
+  # a) Index of AHN6 kilometre sheets (GeoPackage from ahn.nl / PDOK) with a download-URL column:
+  index_file: ../input/ahn6_index.gpkg
+  index_url_field: url          # check the column name in the index and set it here
+  # b) URL template for 1x1 km sheets, {x_km}/{y_km} = lower-left corner in km (or {x}/{y} in m):
+  # url_template: "https://example.org/AHN6/01_LAZ/{x_km}_{y_km}.LAZ"
+  # template_tile_size: 1000
+  # c) A folder with LAZ files you already downloaded:
+  # local_dir: ../input/ahn6
+
+imagery:
+  # PDOK CIR WMS (bands: NIR, R, G). Use a year layer matching the AHN6 flight, if available.
+  wms_url: https://service.pdok.nl/hwh/luchtfotocir/wms/v1_0
+  wms_layer: Actueel_ortho25IR
+  resolution: 0.25
+  # Or local GeoTIFF/JP2 tiles instead of the WMS:
+  # local_dir: ../input/cir
+
+lidar:
+  resolution: 0.5
+  vegetation_classes: [1]       # run `crowns inspect <file.laz>` to check the classes in AHN6
+  ground_classes: [2]
+  building_classes: [6]
+
+mask:
+  min_height: 2.5
+  ndvi_threshold: 0.15
+  min_spread: 0.25
+
+treetops:
+  smooth_sigma: 0.5
+  window_a: 1.0
+  window_b: 0.08
+  min_height: 3.0
+
+segment:
+  rel_height: 0.4
+  max_radius: 15
+
+run:
+  workers: 4                    # parallel processes; ~1 GB RAM each per 8 million points in a tile
+  save_rasters: true            # keep CHM/NDVI/mask/crown rasters per tile for checking in QGIS
+
+evaluate:
+  register_file: ../input/bomenregister.gpkg
+  zones_file: ../input/eval_zones.gpkg   # public-space polygons where the register is complete
+  match_distance: 3.0
+  tiles: []                     # e.g. ["136000_455500", "136500_455500"]
+
+tune:
+  tiles: []
+  grid:
+    treetops.smooth_sigma: [0.25, 0.5, 0.75]
+    treetops.window_b: [0.05, 0.08, 0.11]
+    segment.rel_height: [0.3, 0.4, 0.5]

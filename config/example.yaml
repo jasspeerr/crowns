@@ -65,14 +65,18 @@ run:
   workers: 4                    # parallel processes; ~1 GB RAM each per 8 million points in a tile
   save_rasters: true            # keep CHM/NDVI/mask/crown rasters per tile for checking in QGIS
 
+reference:
+  file: ../reference/reference.gpkg   # sample plots to correct; created by `crowns sample-plots`
+  n_plots: 40
+  plot_size: 50                 # metres
+  cover_classes: [0.05, 0.25, 0.5]   # plots spread evenly over these canopy-cover classes
+  tune_fraction: 0.5            # share of plots for tuning; the rest is for testing
+
 evaluate:
-  register_file: ../input/bomenregister.gpkg
-  zones_file: ../input/eval_zones.gpkg   # public-space polygons where the register is complete
-  match_distance: 3.0
-  tiles: []                     # e.g. ["136000_455500", "136500_455500"]
+  iou_threshold: 0.5
+  split: test                   # plots used by `crowns evaluate`: test, tune or all
 
 tune:
-  tiles: []
   grid:
     treetops.smooth_sigma: [0.25, 0.5, 0.75]
     treetops.window_b: [0.05, 0.08, 0.11]

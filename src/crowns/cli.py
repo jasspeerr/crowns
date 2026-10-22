@@ -1,4 +1,4 @@
-"""Command line: `crowns tiles|inspect|download|run|merge|evaluate|tune CONFIG`."""
+"""Command line: `crowns tiles|inspect|download|run|merge|sample-plots|evaluate|tune`."""
 
 from __future__ import annotations
 
@@ -125,42 +125,74 @@ def merge(config: Path):
     typer.echo(f"{len(crowns)} crowns -> {out}")
 
 
-@app.command()
-def evaluate(config: Path, tile_ids: Optional[str] = TilesOpt):
-    """Compare processed tiles with the tree register; writes <output>/evaluation.gpkg/.json."""
-    import geopandas as gpd
-    import pandas as pd
-
-    from .config import CRS
-    from .evaluate import evaluate as run_eval
-    from .evaluate import evaluated_area, load_register, load_zones, write_evaluation
-    from .pipeline import tile_dir
-    from .polygons import empty_crowns
+@app.command("sample-plots")
+def sample_plots(
+    config: Path,
+    n: Optional[int] = typer.Option(None, help="Number of plots (default: reference.n_plots)"),
+    force: bool = typer.Option(False, help="Replace an existing reference file (it is kept as a backup)"),
+):
+    """Pick sample plots from processed tiles and export the draft crowns for correction."""
+    from .reference import export_reference, load_tile_crowns, processed_tiles
+    from .reference import sample_plots as pick
 
     cfg = _setup(config)
-    boundary, ts = _tiles(cfg, tile_ids or cfg.evaluate.tiles or None)
-    ts = [t for t in ts if (tile_dir(cfg, t.id) / "done.json").exists()]
+    if n:
+        cfg = cfg.with_overrides({"reference.n_plots": n})
+    boundary, ts = _tiles(cfg)
+    ts = processed_tiles(cfg, ts)
     if not ts:
-        raise typer.BadParameter("None of these tiles has been processed yet; run `crowns run` first.")
-    parts = [gpd.read_file(f, layer="crowns") for t in ts if (f := tile_dir(cfg, t.id) / "crowns.gpkg").exists()]
-    crowns = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=CRS) if parts else empty_crowns()
-    result = run_eval(cfg, crowns, load_register(cfg), ts, evaluated_area(ts, boundary), load_zones(cfg))
+        raise typer.BadParameter("No processed tiles yet; run `crowns run` first.")
+    crowns = load_tile_crowns(cfg, ts)
+    plots = pick(cfg, ts, boundary, crowns)
+    try:
+        out = export_reference(cfg, plots, crowns, ts, force=force)
+    except FileExistsError as e:
+        raise typer.BadParameter(str(e))
+    counts = plots.groupby(["cover_class", "split"]).size().unstack(fill_value=0)
+    typer.echo(counts.to_string())
+    typer.echo(f"{len(plots)} plots -> {out}")
+    typer.echo("Open it in QGIS, correct the 'crowns' layer in each plot, then set the plot's status to 'done'.")
+
+
+def _evaluation_tiles(cfg: Config, plots):
+    from .evaluate import tiles_for_plots
+    from .pipeline import tile_dir
+
+    _, ts = _tiles(cfg)
+    needed = tiles_for_plots(ts, plots, cfg.tiling.buffer)
+    missing = [t.id for t in needed if not (tile_dir(cfg, t.id) / "done.json").exists()]
+    return needed, missing
+
+
+@app.command()
+def evaluate(
+    config: Path,
+    split: Optional[str] = typer.Option(None, help="Plots to use: test, tune or all (default: evaluate.split)"),
+):
+    """Score the current results against the corrected plots; writes <output>/evaluation.gpkg/.json."""
+    from .evaluate import evaluate as run_eval
+    from .evaluate import load_reference, write_evaluation
+    from .reference import load_tile_crowns
+
+    cfg = _setup(config)
+    ref = load_reference(cfg, split or cfg.evaluate.split)
+    needed, missing = _evaluation_tiles(cfg, ref.plots)
+    if missing:
+        raise typer.BadParameter(f"Process these tiles first: {', '.join(missing)}")
+    result = run_eval(cfg, ref, load_tile_crowns(cfg, needed))
     out = write_evaluation(result, cfg.output_dir, "evaluation")
     typer.echo(json.dumps(result.metrics, indent=2))
     typer.echo(f"details -> {out}")
 
 
 @app.command()
-def tune(config: Path, tile_ids: Optional[str] = TilesOpt):
-    """Grid search over tune.grid on a few tiles; writes <output>/tuning.csv, best first."""
+def tune(config: Path):
+    """Grid search over tune.grid on the finished 'tune' plots; writes <output>/tuning.csv, best first."""
     from .evaluate import tune as run_tune
 
     cfg = _setup(config)
-    ids = tile_ids or cfg.tune.tiles or cfg.evaluate.tiles
-    if not ids:
-        raise typer.BadParameter("Pick a few tiles with --tiles or tune.tiles; tuning on all tiles is too slow.")
-    boundary, ts = _tiles(cfg, ids)
-    df = run_tune(cfg, ts, boundary)
+    _, ts = _tiles(cfg)
+    df = run_tune(cfg, ts)
     out = cfg.output_dir / "tuning.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out, index=False)

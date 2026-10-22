@@ -10,7 +10,7 @@ import laspy
 import numpy as np
 import rasterio
 from affine import Affine
-from shapely.geometry import Point, box
+from shapely.geometry import box
 
 CRS = "EPSG:28992"
 X0, Y0 = 120_000.0, 480_000.0  # lower-left corner, on a 100 m grid
@@ -140,18 +140,32 @@ def write_boundary(path: Path) -> Path:
     return path
 
 
-def write_register(path: Path, trees: list[Tree], seed: int = 1) -> Path:
-    """Register with small position errors, plus one tree that no longer exists."""
-    rng = np.random.default_rng(seed)
-    pts = [Point(t.x + rng.normal(0, 0.5), t.y + rng.normal(0, 0.5)) for t in trees]
-    pts.append(Point(X0 + 20, Y0 + 180))  # removed tree: no canopy there
-    gpd.GeoDataFrame({"boom_id": range(1, len(pts) + 1)}, geometry=pts, crs=CRS).to_file(path)
-    return path
+def true_crowns(trees: list[Tree], res: float = 0.25) -> gpd.GeoDataFrame:
+    """Visible crown of each tree: where its canopy surface is the highest. Stands in for crowns
+    a person would draw."""
+    from rasterio.features import shapes
+    from shapely.geometry import shape
 
-
-def write_zones(path: Path) -> Path:
-    gpd.GeoDataFrame(geometry=[box(X0, Y0, X0 + SIZE, Y0 + SIZE)], crs=CRS).to_file(path)
-    return path
+    n = int(SIZE / res)
+    best = np.zeros((n, n))
+    label = np.zeros((n, n), np.int32)
+    for k, t in enumerate(trees, start=1):
+        # Only the pixels in the tree's bounding box.
+        c0, c1 = max(int((t.x - t.radius - X0) / res), 0), min(int((t.x + t.radius - X0) / res) + 2, n)
+        r0, r1 = max(int((Y0 + SIZE - t.y - t.radius) / res), 0), min(int((Y0 + SIZE - t.y + t.radius) / res) + 2, n)
+        cols, rows = np.meshgrid(np.arange(c0, c1), np.arange(r0, r1))
+        d = np.hypot(X0 + (cols + 0.5) * res - t.x, Y0 + SIZE - (rows + 0.5) * res - t.y)
+        h = np.where(d <= t.radius, canopy_surface(t, d), 0)
+        higher = h > best[r0:r1, c0:c1]
+        best[r0:r1, c0:c1][higher] = h[higher]
+        label[r0:r1, c0:c1][higher] = k
+    geoms = {}
+    for g, v in shapes(label, mask=label > 0, transform=Affine(res, 0, X0, 0, -res, Y0 + SIZE)):
+        poly = shape(g)
+        if int(v) not in geoms or poly.area > geoms[int(v)].area:
+            geoms[int(v)] = poly
+    keys = sorted(geoms)
+    return gpd.GeoDataFrame({"tree": keys}, geometry=[geoms[k] for k in keys], crs=CRS)
 
 
 def make_scene(root: Path, trees: list[Tree] | None = None) -> dict[str, Path]:
@@ -160,6 +174,4 @@ def make_scene(root: Path, trees: list[Tree] | None = None) -> dict[str, Path]:
         "laz": write_laz(root / "ahn" / "scene.laz", trees),
         "cir": write_cir(root / "cir" / "scene.tif", trees),
         "boundary": write_boundary(root / "boundary.gpkg"),
-        "register": write_register(root / "register.gpkg", trees),
-        "zones": write_zones(root / "zones.gpkg"),
     }

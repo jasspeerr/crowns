@@ -55,16 +55,13 @@ pytest                             # runs on synthetic data, no downloads needed
    ```bash
    crowns inspect data/cache/ahn/<sheet>.LAZ
    ```
-3. Look at the tile grid and pick a few test tiles (a street, a park, a residential area):
-   ```bash
-   crowns tiles my.yaml               # writes output/tiles.gpkg
-   crowns run my.yaml --tiles 136000_455500,136500_455500
-   ```
-4. Evaluate against the tree register, and tune (see below).
-5. Run everything. Without `--tiles`, all results are merged into one GeoPackage:
+3. Run everything. Without `--tiles`, all results are merged into one GeoPackage:
    ```bash
    crowns run my.yaml --workers 4
    ```
+   To try a few tiles first: `crowns tiles my.yaml` writes the grid to `output/tiles.gpkg`, then
+   `crowns run my.yaml --tiles 136000_455500,136500_455500`.
+4. Make evaluation data by correcting sample plots, then tune and evaluate (see below).
 
 `crowns download my.yaml` fetches all data first without processing, which is useful before going
 offline. If tiles fail, the run reports them; running again only redoes unfinished tiles.
@@ -87,29 +84,59 @@ offline. If tiles fail, the run reports them; running again only redoes unfinish
 > was built, because PDOK wasn't reachable from the build machine. If a request fails, check the
 > layer names in the WMS GetCapabilities and the field names of the boundary WFS, and adjust the config.
 
-## Evaluation and tuning with a tree register
+## Evaluation data: correcting draft results
+
+The evaluation data is made by correcting the pipeline's own draft results in sample plots,
+which is much faster than drawing crowns from scratch.
 
 ```bash
-crowns evaluate my.yaml --tiles 136000_455500,136500_455500
-crowns tune my.yaml                # uses tune.tiles and tune.grid
+crowns sample-plots my.yaml        # picks plots, writes reference/reference.gpkg + rasters
+# ... correct the plots in QGIS ...
+crowns tune my.yaml                # tries tune.grid on the 'tune' plots -> output/tuning.csv
+crowns run my.yaml                 # re-run with the chosen settings (only detection is redone)
+crowns evaluate my.yaml            # scores the 'test' plots -> output/evaluation.json/.gpkg
 ```
 
-- Register points are matched one-to-one to detected tree tops within `evaluate.match_distance`
-  (3 m), using an optimal (Hungarian) assignment.
-- **Recall** = share of register trees that were found.
-  Trees with no canopy ≥ `treetops.min_height` nearby (removed, just planted, or too small) are
-  counted separately as `register_small_or_absent`.
-- **Precision** needs `evaluate.zones_file`: polygons where *every* tree is in the register.
-  The register only covers public trees, so a detected private garden tree would otherwise count as a
-  false positive. Draw a few zones in QGIS (streets and parks without private gardens), or derive
-  them from BGT (road and public green areas).
-- Also reported: `merged_crowns` (crowns containing ≥ 2 register trees: under-segmentation),
-  `split_extra_tops` (extra tops next to a matched tree: over-segmentation), and `in_crown_rate`.
-- `output/evaluation.gpkg` holds the register points and tree tops with a `status` column, for
-  finding the problem areas in QGIS.
-- `crowns tune` tries every combination in `tune.grid` (detection settings only) on the chosen
-  tiles and writes `output/tuning.csv`, best zone F1 first. Tune on a few tiles, then check on
-  *other* tiles before running everything.
+**Sampling.** `sample-plots` picks `reference.n_plots` squares of `reference.plot_size` m (default
+40 × 50 m) at random from processed tiles. The plots are spread evenly over canopy-cover classes, so
+dense canopy, where most errors happen, is well represented. If a class runs short, the rest is
+filled from the other classes. Half the plots are marked `tune`, the other half `test`.
+
+**Correcting.** Open `reference/reference.gpkg` in QGIS with the background rasters in
+`reference/rasters/` (`P001_chm.tif` canopy height, `P001_cir.tif` infrared photo). For each plot:
+
+1. Edit the `crowns` layer for every crown whose **centre lies inside the plot**:
+   delete false crowns (hedges, poles, roofs), draw missing trees, fix outlines, and split or merge
+   crowns. Crowns crossing the plot edge are included so they can be fixed too.
+2. Set the plot's `status` to `done` only after every tree in it has been checked. Plots that are
+   not `done` are ignored, so you can work in several sessions.
+
+**Avoiding a flattering reference.** When correcting a draft, it is easy to accept outlines that
+look roughly right and to overlook trees the model also missed. That makes the scores too
+optimistic. To limit this:
+- Scan every plot systematically for missing trees (CHM and photo side by side), don't only check
+  the drafts.
+- `crowns_draft` keeps an untouched copy. `evaluate` reports under `edits` how many crowns were
+  unchanged, reshaped, added or deleted. A very high unchanged share is a warning sign.
+- Keep the reference fixed once made. `sample-plots` refuses to overwrite it (`--force` keeps a
+  backup). Later model versions are then judged against the same data. Avoid re-drafting plots
+  from a newer model.
+- Tune only on `tune` plots and report results on `test` plots.
+
+**Scores** (`output/evaluation.json`):
+- Detected and reference crowns are paired one-to-one by overlap (IoU = intersection / union),
+  with an optimal (Hungarian) assignment; a pair matches when IoU ≥ `evaluate.iou_threshold` (0.5).
+- `precision`: share of detected crowns that are real. `recall`: share of reference crowns found.
+  `f1` combines both. `mean_iou_matched` measures how well the matched outlines fit.
+- `merged_detections`: detected crowns covering two or more reference crowns (under-segmentation).
+  `split_references`: reference crowns split into two or more detections (over-segmentation).
+- `canopy_area_precision` / `canopy_area_recall`: total canopy area agreement, ignoring individual trees.
+- `recall_by_size` and `by_cover_class`: where the errors are.
+- `output/evaluation.gpkg` has the plots (with scores per plot), the reference crowns and the
+  detections, each with a `status` column (matched / missed / false), to find problems in QGIS.
+
+`crowns tune` tries every combination in `tune.grid` (detection settings only) on the finished
+`tune` plots. It writes `output/tuning.csv`, best F1 first.
 
 ## Performance
 

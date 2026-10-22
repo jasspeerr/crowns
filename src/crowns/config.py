@@ -120,19 +120,30 @@ class RunConfig:
 
 
 @dataclass
+class ReferenceConfig:
+    """Sample plots with draft crowns that a person corrects, to serve as evaluation data."""
+
+    file: str = "reference/reference.gpkg"
+    n_plots: int = 40
+    plot_size: float = 50.0  # metres
+    # Plots are spread evenly over canopy-cover classes (share of the plot under crowns), so dense
+    # canopy, where most errors occur, is not under-represented. Plots below the first value are skipped.
+    cover_classes: list[float] = field(default_factory=lambda: [0.05, 0.25, 0.5])
+    tune_fraction: float = 0.5  # share of plots used for tuning; the rest is kept for testing
+    seed: int = 0
+    raster_margin: float = 10.0  # metres of background raster around each plot
+
+
+@dataclass
 class EvaluateConfig:
-    register_file: str | None = None
-    register_layer: str | None = None
-    zones_file: str | None = None  # polygons where every tree is in the register (public space)
-    match_distance: float = 3.0
-    tiles: list[str] = field(default_factory=list)  # empty = all processed tiles
+    iou_threshold: float = 0.5  # a detected crown matches a reference crown when IoU >= this
+    split: str = "test"  # which plots `crowns evaluate` uses: test, tune or all
 
 
 @dataclass
 class TuneConfig:
     # Dotted parameter names mapped to candidate values, e.g. {"treetops.window_b": [0.06, 0.08]}.
     grid: dict[str, list[Any]] = field(default_factory=dict)
-    tiles: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -148,6 +159,7 @@ class Config:
     segment: SegmentConfig = field(default_factory=SegmentConfig)
     polygons: PolygonConfig = field(default_factory=PolygonConfig)
     run: RunConfig = field(default_factory=RunConfig)
+    reference: ReferenceConfig = field(default_factory=ReferenceConfig)
     evaluate: EvaluateConfig = field(default_factory=EvaluateConfig)
     tune: TuneConfig = field(default_factory=TuneConfig)
 
@@ -226,3 +238,5 @@ def _validate(cfg: Config) -> None:
         raise ValueError("tiling.size must be > 0 and tiling.buffer >= 0")
     if cfg.lidar.resolution <= 0:
         raise ValueError("lidar.resolution must be > 0")
+    if cfg.evaluate.split not in ("test", "tune", "all"):
+        raise ValueError("evaluate.split must be test, tune or all")

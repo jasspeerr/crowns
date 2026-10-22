@@ -3,7 +3,7 @@ import pytest
 from shapely.geometry import Point, box
 
 from crowns.config import (MaskConfig, PolygonConfig, SegmentConfig, TreetopConfig, config_from_dict)
-from crowns.evaluate import match_points
+from crowns.evaluate import match_polygons
 from crowns.lidar import fill_gaps, grid_count, grid_max, grid_min
 from crowns.mask import vegetation_mask
 from crowns.polygons import crowns_to_polygons
@@ -156,13 +156,18 @@ def test_mask_uses_ndvi_when_lidar_is_not_porous():
 
 # -- evaluation ------------------------------------------------------------------------------
 
-def test_match_points_is_one_to_one_and_optimal():
-    a = np.array([[0, 0], [2, 0], [100, 100]], float)
-    b = np.array([[1.9, 0], [0, 0], [50, 50]], float)
-    ia, ib, d = match_points(a, b, 3.0)
-    pairs = sorted(zip(ia.tolist(), ib.tolist()))
-    assert pairs == [(0, 1), (1, 0)]  # greedy on (0 -> 1.9) would be worse
-    assert np.allclose(sorted(d), [0.0, 0.1])
+def test_match_polygons_is_one_to_one_and_optimal():
+    import geopandas as gpd
+
+    # Reference crown 0 overlaps both detections; the best total is 0->1 and 1->0.
+    ref = gpd.GeoDataFrame(geometry=[box(0, 0, 4, 4), box(3, 0, 7, 4)])
+    pred = gpd.GeoDataFrame(geometry=[box(3.2, 0, 7, 4), box(0, 0, 3.8, 4), box(50, 50, 52, 52)])
+    ia, ib, iou = match_polygons(ref, pred, 0.5)
+    assert sorted(zip(ia.tolist(), ib.tolist())) == [(0, 1), (1, 0)]
+    assert (iou > 0.9).all()
+    # A detection straddling both crowns (IoU 0.45 with each) matches neither.
+    ia, _, _ = match_polygons(ref, gpd.GeoDataFrame(geometry=[box(1.5, 0, 5.5, 4)]), 0.5)
+    assert ia.size == 0
 
 
 # -- config ----------------------------------------------------------------------------------

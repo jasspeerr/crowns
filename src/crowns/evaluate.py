@@ -23,6 +23,7 @@ from scipy.sparse.csgraph import connected_components
 
 from .config import CRS, Config
 from .pipeline import DETECT_SECTIONS, detect, prepare_rasters
+from .polygons import max_extent
 from .reference import CROWN_LAYER, DRAFT_LAYER, PLOT_LAYER, reference_path
 from .sources.ahn import AhnSource
 from .tiling import Tile
@@ -234,6 +235,32 @@ def evaluate(cfg: Config, ref: Reference, pred: gpd.GeoDataFrame) -> EvalResult:
         "canopy_area_precision": _round(overlap / pred_canopy.area) if pred_canopy.area else None,
         "canopy_area_recall": _round(overlap / ref_canopy.area) if ref_canopy.area else None,
     }
+
+    # Size accuracy of matched crowns: detected minus reference. A negative bias means the
+    # detected crowns are too small.
+    rc["area_m2"] = np.round(shapely.area(rc.geometry.values), 2)
+    rc["diam_max"] = np.round([max_extent(g) for g in rc.geometry.values], 2)
+    rc["pred_area_m2"] = np.nan
+    rc["pred_diam_max"] = np.nan
+    pairs = r_in[ia]
+    if pairs.any():
+        ref_rows, pred_rows = ia[pairs], ib[pairs]
+        ref_a = rc["area_m2"].to_numpy()[ref_rows]
+        pred_a = shapely.area(pc.geometry.values[pred_rows])
+        ref_d, pred_d = 2 * np.sqrt(ref_a / np.pi), 2 * np.sqrt(pred_a / np.pi)
+        ref_x = rc["diam_max"].to_numpy()[ref_rows]
+        pred_x = np.array([max_extent(g) for g in pc.geometry.values[pred_rows]])
+        rel = (pred_a - ref_a) / ref_a
+        metrics.update({
+            "area_bias_pct": _round(100 * rel.mean()),
+            "area_mae_pct": _round(100 * np.abs(rel).mean()),
+            "diam_eq_bias_m": _round((pred_d - ref_d).mean()),
+            "diam_eq_rmse_m": _round(np.sqrt(((pred_d - ref_d) ** 2).mean())),
+            "diam_max_bias_m": _round((pred_x - ref_x).mean()),
+            "diam_max_rmse_m": _round(np.sqrt(((pred_x - ref_x) ** 2).mean())),
+        })
+        rc.loc[ref_rows, "pred_area_m2"] = np.round(pred_a, 2)
+        rc.loc[ref_rows, "pred_diam_max"] = np.round(pred_x, 2)
 
     # Recall by crown size, and scores by canopy-cover class.
     r_area = rc.geometry.area.to_numpy()

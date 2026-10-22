@@ -142,6 +142,12 @@ def test_corrected_reference(scene):
     assert m["f1"] == 1.0
     assert 0.7 < m["mean_iou_matched"] < 1.0
     assert m["merged_detections"] == 0 and m["split_references"] == 0
+    # Detected crowns are trimmed at rel_height and smoothed, so they come out somewhat small.
+    assert -40 < m["area_bias_pct"] < 10 and m["area_mae_pct"] < 40
+    assert abs(m["diam_eq_bias_m"]) < 1.5 and m["diam_eq_rmse_m"] < 1.5
+    assert abs(m["diam_max_bias_m"]) < 1.5
+    scored = result.reference[result.reference["status"] == "matched"]
+    assert scored["pred_area_m2"].notna().all() and (scored["area_m2"] > 0).all()
     assert m["edits"]["added"] == m["edits"]["reference_crowns"] and m["edits"]["unchanged"] == 0
     assert set(result.reference["status"]) <= {"matched", "outside"}
 

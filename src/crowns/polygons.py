@@ -70,7 +70,7 @@ def crowns_to_polygons(
             "h_mean": np.round(h_mean, 2),
             "area_m2": np.round(area, 2),
             "diam_eq": np.round(2 * np.sqrt(area / np.pi), 2),
-            "diam_max": np.round([_max_extent(p) for p in polys], 2),
+            "diam_max": np.round([max_extent(p) for p in polys], 2),
         },
         geometry=list(polys),
         crs=CRS,
@@ -88,7 +88,7 @@ def _largest_polygon(geom) -> Polygon:
     return max(parts, key=lambda g: g.area) if parts else Polygon()
 
 
-def _max_extent(poly: Polygon) -> float:
+def max_extent(poly: Polygon) -> float:
     """Longest distance across the crown (between two points of its convex hull)."""
     if poly.is_empty:
         return 0.0

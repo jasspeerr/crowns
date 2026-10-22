@@ -130,13 +130,21 @@ optimistic. To limit this:
   `f1` combines both. `mean_iou_matched` measures how well the matched outlines fit.
 - `merged_detections`: detected crowns covering two or more reference crowns (under-segmentation).
   `split_references`: reference crowns split into two or more detections (over-segmentation).
+- Crown size of matched crowns, detected minus reference (negative = detected too small):
+  `area_bias_pct` and `area_mae_pct` (mean and mean absolute error, % of the reference area),
+  `diam_eq_bias_m` / `diam_eq_rmse_m` (equivalent-circle diameter), and `diam_max_bias_m` /
+  `diam_max_rmse_m` (longest distance across the crown). Per crown, the reference layer in
+  `evaluation.gpkg` has `area_m2` / `pred_area_m2` and `diam_max` / `pred_diam_max`.
 - `canopy_area_precision` / `canopy_area_recall`: total canopy area agreement, ignoring individual trees.
 - `recall_by_size` and `by_cover_class`: where the errors are.
 - `output/evaluation.gpkg` has the plots (with scores per plot), the reference crowns and the
   detections, each with a `status` column (matched / missed / false), to find problems in QGIS.
 
 `crowns tune` tries every combination in `tune.grid` (detection settings only) on the finished
-`tune` plots. It writes `output/tuning.csv`, best F1 first.
+`tune` plots. It writes `output/tuning.csv`, best F1 first, with all size errors as columns.
+Choose by F1 *and* size errors: settings for crown edges (`segment.rel_height`,
+`treetops.smooth_sigma`, `mask.min_height`, `polygons.smooth`) mostly change the area and diameter
+bias, not the number of trees found.
 
 ## Performance
 

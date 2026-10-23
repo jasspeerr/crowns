@@ -21,7 +21,9 @@ Per tile:
 1. **Rasters from the point cloud (0.5 m):** terrain (lowest ground point, gaps interpolated),
    canopy height model (CHM = highest vegetation point minus terrain; empty cells inside crowns
    filled), building mask, and *return spread* (share of vegetation points that are not the last
-   return: high in foliage, low on roofs and cars).
+   return: high in foliage, low on roofs and cars). A cell counts as building only when the roof is
+   its top surface. Where vegetation is more than `lidar.roof_clearance` above the roof (a crown
+   hanging over a house), the cell stays canopy, even though the laser also reached the roof.
 2. **NDVI** from the CIR image, averaged onto the same grid. The orthophoto is not a true ortho, so
    tall crowns can appear shifted by a few metres. NDVI is therefore only supporting evidence
    (dilated by `mask.ndvi_dilate`), and crown shapes always come from the CHM.
@@ -160,4 +162,6 @@ takes about 10 s and under 1 GB of memory. For ~100 km² (~400 tiles) on 4 cores
   but very open crowns may still be split into several trees. Tune `treetops.smooth_sigma` and
   `segment.rel_height`.
 - Imagery and lidar from different years: trees felled or planted in between cause mismatches.
-- Crowns hanging over roofs are cut at the building outline (`mask.building_buffer`).
+- Crowns hanging over roofs are kept where they are more than `lidar.roof_clearance` (1 m) above
+  the roof. The thin crown edge closer to the roof than that, plus `mask.building_buffer`, is cut off.
+  Vegetation growing on roofs (roof gardens, tall planters) can show up as trees.

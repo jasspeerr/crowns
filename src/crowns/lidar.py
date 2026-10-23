@@ -136,14 +136,14 @@ def build_rasters(points: Points, grid: Grid, cfg: LidarConfig) -> LidarRasters:
     hag = np.full(len(vx), np.nan)
     hag[inside] = vz[inside] - dtm[row[inside], col[inside]]
     ok = inside & (hag > 0) & (hag < cfg.max_height)
-    chm = grid_max(grid, vx[ok], vy[ok], hag[ok])
+    veg_top = grid_max(grid, vx[ok], vy[ok], hag[ok])  # NaN where no vegetation
 
     # Fill empty cells inside crowns (leaf-off lidar leaves holes) with a grey closing.
     # Only empty cells are changed, so existing heights and crown outlines stay as measured.
-    chm0 = np.nan_to_num(chm, nan=0.0)
+    chm0 = np.nan_to_num(veg_top, nan=0.0)
     if cfg.pit_fill_size > 1:
         closed = ndimage.grey_closing(chm0, size=(cfg.pit_fill_size, cfg.pit_fill_size))
-        chm = np.where(np.isnan(chm), closed, chm0)
+        chm = np.where(np.isnan(veg_top), closed, chm0)
     else:
         chm = chm0
 
@@ -156,7 +156,11 @@ def build_rasters(points: Points, grid: Grid, cfg: LidarConfig) -> LidarRasters:
     n_multi = ndimage.uniform_filter(n_multi, size=3)
     spread = np.divide(n_multi, n_all, out=np.zeros_like(n_all), where=n_all > 0)
 
-    building = grid_count(grid, points.x[bld], points.y[bld]) > 0
+    # Building cells: only where the roof is the top surface. Under an overhanging crown the laser
+    # still reaches the roof (most of all leaf-off), but the crown above it should stay canopy.
+    roof_top = grid_max(grid, points.x[bld], points.y[bld], points.z[bld]) - dtm  # NaN where no roof
+    under_canopy = np.nan_to_num(veg_top, nan=-np.inf) > roof_top + cfg.roof_clearance
+    building = np.isfinite(roof_top) & ~under_canopy
     return LidarRasters(dtm=dtm, chm=chm, spread=spread, building=building, point_count=len(points))
 
 

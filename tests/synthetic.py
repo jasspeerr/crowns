@@ -36,11 +36,19 @@ def default_trees() -> list[Tree]:
         Tree(X0 + 127, Y0 + 130, 13, 4.0),
         # On the 100 m tile edge: must be found exactly once.
         Tree(X0 + 100.5, Y0 + 50, 15, 4.5),
+        # Next to the building, crown hanging a few metres over the roof.
+        OVERHANG_TREE,
     ]
     return trees
 
 
 BUILDING = (X0 + 60, Y0 + 60, X0 + 80, Y0 + 75, 9.0)  # xmin, ymin, xmax, ymax, height
+OVERHANG_TREE = Tree(X0 + 57, Y0 + 68, 20, 6.0)
+
+
+def in_building(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    bx0, by0, bx1, by1, _ = BUILDING
+    return (x >= bx0) & (x <= bx1) & (y >= by0) & (y <= by1)
 
 
 def ground_z(x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -66,11 +74,12 @@ def make_points(trees: list[Tree], seed: int = 0, density: float = 10.0):
     gx = X0 + rng.uniform(0, SIZE, n)
     gy = Y0 + rng.uniform(0, SIZE, n)
     bx0, by0, bx1, by1, bh = BUILDING
-    outside = ~((gx >= bx0) & (gx <= bx1) & (gy >= by0) & (gy <= by1))
+    outside = ~in_building(gx, gy)
     gx, gy = gx[outside], gy[outside]
     add(gx, gy, ground_z(gx, gy) + rng.normal(0, 0.03, len(gx)), 2, np.ones(len(gx)), np.ones(len(gx)))
 
-    # Building roof: single returns, class 6.
+    # Building roof: single returns, class 6. Also under overhanging crowns: AHN is mostly flown
+    # leaf-off, so the laser reaches the roof through the branches.
     m = int((bx1 - bx0) * (by1 - by0) * density)
     rx = rng.uniform(bx0, bx1, m)
     ry = rng.uniform(by0, by1, m)
@@ -87,8 +96,10 @@ def make_points(trees: list[Tree], seed: int = 0, density: float = 10.0):
         depth = rng.exponential(0.3, k)
         later = rng.uniform(0, 1, k) < 0.5
         depth[later] += rng.uniform(0.5, 3.0, later.sum())
-        z = ground_z(x, y) + np.maximum(surface - depth, 0.5)
-        add(x, y, z, 1, np.where(later, 2, 1), np.full(k, 3))
+        hag = np.maximum(surface - depth, 0.5)
+        keep = ~(in_building(x, y) & (hag <= bh))  # nothing grows inside the building
+        x, y, hag, later = x[keep], y[keep], hag[keep], later[keep]
+        add(x, y, ground_z(x, y) + hag, 1, np.where(later, 2, 1), np.full(len(x), 3))
 
     return tuple(np.concatenate(v) for v in (xs, ys, zs, cls, rn, nr))
 
@@ -141,13 +152,15 @@ def write_boundary(path: Path) -> Path:
 
 
 def true_crowns(trees: list[Tree], res: float = 0.25) -> gpd.GeoDataFrame:
-    """Visible crown of each tree: where its canopy surface is the highest. Stands in for crowns
-    a person would draw."""
+    """Visible crown of each tree: where its canopy surface is the highest, and above any roof.
+    Stands in for crowns a person would draw."""
     from rasterio.features import shapes
     from shapely.geometry import shape
 
     n = int(SIZE / res)
-    best = np.zeros((n, n))
+    cols, rows = np.meshgrid(np.arange(n), np.arange(n))
+    roof = in_building(X0 + (cols + 0.5) * res, Y0 + SIZE - (rows + 0.5) * res)
+    best = np.where(roof, BUILDING[4], 0.0)
     label = np.zeros((n, n), np.int32)
     for k, t in enumerate(trees, start=1):
         # Only the pixels in the tree's bounding box.

@@ -4,7 +4,8 @@ from shapely.geometry import Point, box
 
 from crowns.config import (MaskConfig, PolygonConfig, SegmentConfig, TreetopConfig, config_from_dict)
 from crowns.evaluate import match_polygons
-from crowns.lidar import fill_gaps, grid_count, grid_max, grid_min
+from crowns.config import LidarConfig
+from crowns.lidar import Points, build_rasters, fill_gaps, grid_count, grid_max, grid_min
 from crowns.mask import vegetation_mask
 from crowns.polygons import crowns_to_polygons
 from crowns.segment import segment_crowns
@@ -70,6 +71,20 @@ def test_fill_gaps_keeps_zero_heights():
     assert np.isfinite(filled).all()
     assert np.all(filled[:, :10] == 0.0)
     assert filled[:, -1].max() <= 0.2 + 1e-6
+
+
+def test_building_mask_keeps_canopy_over_roofs():
+    # Four 1 m cells: roof; roof under a crown; roof with vegetation points at roof level (eaves);
+    # a stray class-6 point inside a crown.
+    g = Grid.from_bounds((0, 0, 4, 1), 1.0)
+    pts = [(x + 0.5, 0.0, 2) for x in range(4)]  # ground in every cell
+    pts += [(0.5, 9.0, 6), (1.5, 9.0, 6), (1.5, 14.0, 1), (2.5, 9.0, 6), (2.5, 9.4, 1),
+            (3.5, 8.0, 6), (3.5, 15.0, 1)]
+    x, z, c = (np.array(v, dtype=float) for v in zip(*pts))
+    one = np.ones(len(x), np.uint8)
+    points = Points(x, np.full(len(x), 0.5), z, c.astype(np.uint8), one, one)
+    building = build_rasters(points, g, LidarConfig(resolution=1.0, pit_fill_size=1)).building
+    assert building.tolist() == [[True, False, True, False]]
 
 
 # -- detection -------------------------------------------------------------------------------

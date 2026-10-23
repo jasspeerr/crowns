@@ -3,7 +3,7 @@
 import geopandas as gpd
 import numpy as np
 import pytest
-from shapely.geometry import Point
+from shapely.geometry import Point, box
 
 from crowns.config import config_from_dict
 from crowns.evaluate import evaluate, load_reference, tune
@@ -12,7 +12,7 @@ from crowns.reference import (CROWN_LAYER, PLOT_LAYER, candidate_plots, canopy_c
                               load_tile_crowns, reference_path, sample_plots)
 from crowns.sources.boundary import load_boundary
 from crowns.tiling import make_tiles
-from synthetic import default_trees, make_scene, true_crowns
+from synthetic import BUILDING, OVERHANG_TREE, default_trees, make_scene, true_crowns
 
 
 @pytest.fixture(scope="module")
@@ -77,6 +77,16 @@ def test_every_tree_found_once_with_correct_height(scene):
         assert abs(hit.iloc[0].h_max - t.height) < 1.5
         assert np.hypot(hit.iloc[0].top_x - t.x, hit.iloc[0].top_y - t.y) < 1.5
     assert crowns["tree_id"].is_unique
+
+
+def test_crown_over_roof_is_kept(scene):
+    *_, crowns = scene
+    t = OVERHANG_TREE
+    roof = box(*BUILDING[:4])
+    truth = true_crowns(default_trees())
+    over_roof = truth[truth.contains(Point(t.x, t.y))].geometry.iloc[0].intersection(roof).area
+    found = crowns[crowns.contains(Point(t.x, t.y))].geometry.iloc[0].intersection(roof).area
+    assert over_roof > 10 and found > 0.4 * over_roof
 
 
 def test_output_layers(scene):

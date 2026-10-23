@@ -73,6 +73,7 @@ class LidarConfig:
     vegetation_classes: list[int] = field(default_factory=lambda: [1])
     ground_classes: list[int] = field(default_factory=lambda: [2])
     building_classes: list[int] = field(default_factory=lambda: [6])
+    roof_clearance: float = 1.0  # metres; vegetation this far above a roof is canopy, not building
     max_height: float = 60.0  # CHM values above this are treated as noise
     pit_fill_size: int = 3  # closing window (cells) used to fill holes in the CHM
 

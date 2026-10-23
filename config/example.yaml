@@ -45,6 +45,7 @@ lidar:
   vegetation_classes: [1]       # run `crowns inspect <file.laz>` to check the classes in AHN6
   ground_classes: [2]
   building_classes: [6]
+  roof_clearance: 1.0           # vegetation this far (m) above a roof counts as canopy, not building
 
 mask:
   min_height: 2.5
